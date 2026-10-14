@@ -268,6 +268,11 @@ void test_spatial() {
     check("angular_bf16_neonbfdot", test_angular<bf16_t>, nk_angular_bf16_neonbfdot);
 #endif // NK_TARGET_NEONBFDOT
 
+#if NK_TARGET_NEONFHM
+    check.section("Spatial Distances NEON FHM", nk_cap_neonfhm_k);
+    check("angular_f16_neonfhm", test_angular<f16_t>, nk_angular_f16_neonfhm);
+#endif // NK_TARGET_NEONFHM
+
 #if NK_TARGET_NEONSDOT
     check.section("Spatial Distances NEON I8", nk_cap_neonsdot_k);
     check("angular_i8_neonsdot", test_angular<i8_t>, nk_angular_i8_neonsdot);
@@ -316,6 +321,11 @@ void test_spatial() {
     check("sqeuclidean_f16_svehalf", test_sqeuclidean<f16_t>, nk_sqeuclidean_f16_svehalf);
     check("euclidean_f16_svehalf", test_euclidean<f16_t>, nk_euclidean_f16_svehalf);
 #endif // NK_TARGET_SVEHALF
+
+#if NK_TARGET_SVE2
+    check.section("Spatial Distances SVE2", nk_cap_sve2_k);
+    check("angular_f16_sve2", test_angular<f16_t>, nk_angular_f16_sve2);
+#endif // NK_TARGET_SVE2
 
 #if NK_TARGET_SVEBFDOT
     check.section("Spatial Distances SVE BF16", nk_cap_svebfdot_k);
