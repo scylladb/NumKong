@@ -616,6 +616,7 @@ NK_PUBLIC void nk_euclidean_f32_haswell(nk_f32_t const *a, nk_f32_t const *b, nk
     *result = nk_f64_sqrt_haswell(sum_f64);
 }
 
+#if NK_ACCUMULATE_F32_IN_F64
 NK_PUBLIC void nk_angular_f32_haswell(nk_f32_t const *a, nk_f32_t const *b, nk_size_t n, nk_f64_t *result) {
     // Upcast to f64 for higher precision accumulation
     __m256d dot_f64x4 = _mm256_setzero_pd();
@@ -643,6 +644,46 @@ NK_PUBLIC void nk_angular_f32_haswell(nk_f32_t const *a, nk_f32_t const *b, nk_s
     }
     *result = nk_angular_normalize_f64_haswell_(dot_f64, a_norm_sq_f64, b_norm_sq_f64);
 }
+#else
+NK_PUBLIC void nk_angular_f32_haswell(nk_f32_t const *a, nk_f32_t const *b, nk_size_t n, nk_f64_t *result) {
+    // f32 accumulation in two independent chains of three FMAs on 8 lanes (six accumulators), like simsimd's
+    // `simsimd_cos_f32_haswell`: three f32 FMAs per 8 floats, where the f64 path above converts a and b (4 lanes
+    // each) and does three f64 FMAs on 4 lanes per 4 floats. HNSW only orders distances, so the f64 accumulation
+    // bought nothing it could use (see `nk_angular_f32_skylake`).
+    __m256 dot0_f32x8 = _mm256_setzero_ps(), a_norm_sq0_f32x8 = _mm256_setzero_ps(),
+           b_norm_sq0_f32x8 = _mm256_setzero_ps();
+    __m256 dot1_f32x8 = _mm256_setzero_ps(), a_norm_sq1_f32x8 = _mm256_setzero_ps(),
+           b_norm_sq1_f32x8 = _mm256_setzero_ps();
+    nk_size_t i = 0;
+    for (; i + 16 <= n; i += 16) {
+        __m256 a0_f32x8 = _mm256_loadu_ps(a + i), b0_f32x8 = _mm256_loadu_ps(b + i);
+        __m256 a1_f32x8 = _mm256_loadu_ps(a + i + 8), b1_f32x8 = _mm256_loadu_ps(b + i + 8);
+        dot0_f32x8 = _mm256_fmadd_ps(a0_f32x8, b0_f32x8, dot0_f32x8);
+        a_norm_sq0_f32x8 = _mm256_fmadd_ps(a0_f32x8, a0_f32x8, a_norm_sq0_f32x8);
+        b_norm_sq0_f32x8 = _mm256_fmadd_ps(b0_f32x8, b0_f32x8, b_norm_sq0_f32x8);
+        dot1_f32x8 = _mm256_fmadd_ps(a1_f32x8, b1_f32x8, dot1_f32x8);
+        a_norm_sq1_f32x8 = _mm256_fmadd_ps(a1_f32x8, a1_f32x8, a_norm_sq1_f32x8);
+        b_norm_sq1_f32x8 = _mm256_fmadd_ps(b1_f32x8, b1_f32x8, b_norm_sq1_f32x8);
+    }
+    if (i + 8 <= n) {
+        __m256 a_f32x8 = _mm256_loadu_ps(a + i), b_f32x8 = _mm256_loadu_ps(b + i);
+        dot0_f32x8 = _mm256_fmadd_ps(a_f32x8, b_f32x8, dot0_f32x8);
+        a_norm_sq0_f32x8 = _mm256_fmadd_ps(a_f32x8, a_f32x8, a_norm_sq0_f32x8);
+        b_norm_sq0_f32x8 = _mm256_fmadd_ps(b_f32x8, b_f32x8, b_norm_sq0_f32x8);
+        i += 8;
+    }
+    nk_f32_t dot_f32 = nk_reduce_add_f32x8_haswell_(_mm256_add_ps(dot0_f32x8, dot1_f32x8));
+    nk_f32_t a_norm_sq_f32 = nk_reduce_add_f32x8_haswell_(_mm256_add_ps(a_norm_sq0_f32x8, a_norm_sq1_f32x8));
+    nk_f32_t b_norm_sq_f32 = nk_reduce_add_f32x8_haswell_(_mm256_add_ps(b_norm_sq0_f32x8, b_norm_sq1_f32x8));
+    for (; i < n; ++i) {
+        nk_f32_t a_f32 = a[i], b_f32 = b[i];
+        dot_f32 += a_f32 * b_f32;
+        a_norm_sq_f32 += a_f32 * a_f32;
+        b_norm_sq_f32 += b_f32 * b_f32;
+    }
+    *result = (nk_f64_t)nk_angular_normalize_f32_haswell_(dot_f32, a_norm_sq_f32, b_norm_sq_f32);
+}
+#endif // NK_ACCUMULATE_F32_IN_F64
 
 NK_PUBLIC void nk_sqeuclidean_f64_haswell(nk_f64_t const *a, nk_f64_t const *b, nk_size_t n, nk_f64_t *result) {
     __m256d sum_f64x4 = _mm256_setzero_pd();

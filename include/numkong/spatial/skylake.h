@@ -118,6 +118,7 @@ NK_INTERNAL nk_f64_t nk_angular_normalize_f64_skylake_(nk_f64_t ab, nk_f64_t a2,
     return result < 0 ? 0 : result;
 }
 
+#if NK_ACCUMULATE_F32_IN_F64
 NK_PUBLIC void nk_angular_f32_skylake(nk_f32_t const *a, nk_f32_t const *b, nk_size_t n, nk_f64_t *result) {
     // Upcast to f64 for higher precision accumulation
     __m512d dot_f64x8 = _mm512_setzero_pd();
@@ -149,6 +150,47 @@ nk_angular_f32_skylake_cycle:
     nk_f64_t b_norm_sq_f64 = _mm512_reduce_add_pd(b_norm_sq_f64x8);
     *result = nk_angular_normalize_f64_skylake_(dot_f64, a_norm_sq_f64, b_norm_sq_f64);
 }
+#else
+NK_PUBLIC void nk_angular_f32_skylake(nk_f32_t const *a, nk_f32_t const *b, nk_size_t n, nk_f64_t *result) {
+    // f32 accumulation in two independent chains of three FMAs on 16 lanes (six accumulators), like simsimd's
+    // `simsimd_cos_f32_skylake`: three f32 FMAs per 16 floats, where the f64 path above converts a and b (8 lanes
+    // each) and does three f64 FMAs on 8 lanes per 8 floats. HNSW only orders distances, so the f64 accumulation
+    // bought nothing it could use and on Sapphire Rapids answered 10% fewer searches per second than simsimd's.
+    __m512 dot0_f32x16 = _mm512_setzero_ps(), a_norm_sq0_f32x16 = _mm512_setzero_ps(),
+           b_norm_sq0_f32x16 = _mm512_setzero_ps();
+    __m512 dot1_f32x16 = _mm512_setzero_ps(), a_norm_sq1_f32x16 = _mm512_setzero_ps(),
+           b_norm_sq1_f32x16 = _mm512_setzero_ps();
+    nk_size_t i = 0;
+    for (; i + 32 <= n; i += 32) {
+        __m512 a0_f32x16 = _mm512_loadu_ps(a + i), b0_f32x16 = _mm512_loadu_ps(b + i);
+        __m512 a1_f32x16 = _mm512_loadu_ps(a + i + 16), b1_f32x16 = _mm512_loadu_ps(b + i + 16);
+        dot0_f32x16 = _mm512_fmadd_ps(a0_f32x16, b0_f32x16, dot0_f32x16);
+        a_norm_sq0_f32x16 = _mm512_fmadd_ps(a0_f32x16, a0_f32x16, a_norm_sq0_f32x16);
+        b_norm_sq0_f32x16 = _mm512_fmadd_ps(b0_f32x16, b0_f32x16, b_norm_sq0_f32x16);
+        dot1_f32x16 = _mm512_fmadd_ps(a1_f32x16, b1_f32x16, dot1_f32x16);
+        a_norm_sq1_f32x16 = _mm512_fmadd_ps(a1_f32x16, a1_f32x16, a_norm_sq1_f32x16);
+        b_norm_sq1_f32x16 = _mm512_fmadd_ps(b1_f32x16, b1_f32x16, b_norm_sq1_f32x16);
+    }
+    if (i + 16 <= n) {
+        __m512 a_f32x16 = _mm512_loadu_ps(a + i), b_f32x16 = _mm512_loadu_ps(b + i);
+        dot0_f32x16 = _mm512_fmadd_ps(a_f32x16, b_f32x16, dot0_f32x16);
+        a_norm_sq0_f32x16 = _mm512_fmadd_ps(a_f32x16, a_f32x16, a_norm_sq0_f32x16);
+        b_norm_sq0_f32x16 = _mm512_fmadd_ps(b_f32x16, b_f32x16, b_norm_sq0_f32x16);
+        i += 16;
+    }
+    if (i < n) {
+        __mmask16 mask = (__mmask16)_bzhi_u32(0xFFFF, n - i);
+        __m512 a_f32x16 = _mm512_maskz_loadu_ps(mask, a + i), b_f32x16 = _mm512_maskz_loadu_ps(mask, b + i);
+        dot1_f32x16 = _mm512_fmadd_ps(a_f32x16, b_f32x16, dot1_f32x16);
+        a_norm_sq1_f32x16 = _mm512_fmadd_ps(a_f32x16, a_f32x16, a_norm_sq1_f32x16);
+        b_norm_sq1_f32x16 = _mm512_fmadd_ps(b_f32x16, b_f32x16, b_norm_sq1_f32x16);
+    }
+    nk_f32_t dot_f32 = nk_reduce_add_f32x16_skylake_(_mm512_add_ps(dot0_f32x16, dot1_f32x16));
+    nk_f32_t a_norm_sq_f32 = nk_reduce_add_f32x16_skylake_(_mm512_add_ps(a_norm_sq0_f32x16, a_norm_sq1_f32x16));
+    nk_f32_t b_norm_sq_f32 = nk_reduce_add_f32x16_skylake_(_mm512_add_ps(b_norm_sq0_f32x16, b_norm_sq1_f32x16));
+    *result = (nk_f64_t)nk_angular_normalize_f32_haswell_(dot_f32, a_norm_sq_f32, b_norm_sq_f32);
+}
+#endif // NK_ACCUMULATE_F32_IN_F64
 
 NK_PUBLIC void nk_sqeuclidean_f64_skylake(nk_f64_t const *a, nk_f64_t const *b, nk_size_t n, nk_f64_t *result) {
     __m512d sum_f64x8 = _mm512_setzero_pd();
