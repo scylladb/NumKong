@@ -376,6 +376,11 @@ NK_PUBLIC void nk_sqeuclidean_u4_neonsdot(nk_u4x2_t const *a, nk_u4x2_t const *b
 NK_PUBLIC void nk_angular_u4_neonsdot(nk_u4x2_t const *a, nk_u4x2_t const *b, nk_size_t n, nk_f32_t *result);
 #endif // NK_TARGET_NEONSDOT
 
+#if NK_TARGET_NEONFHM
+/** @copydoc nk_angular_f64 */
+NK_PUBLIC void nk_angular_f16_neonfhm(nk_f16_t const *a, nk_f16_t const *b, nk_size_t n, nk_f32_t *result);
+#endif // NK_TARGET_NEONFHM
+
 #if NK_TARGET_SVESDOT
 /** @copydoc nk_euclidean_f64 */
 NK_PUBLIC void nk_euclidean_i8_svesdot(nk_i8_t const *a, nk_i8_t const *b, nk_size_t n, nk_f32_t *result);
@@ -444,6 +449,11 @@ NK_PUBLIC void nk_sqeuclidean_f16_svehalf(nk_f16_t const *a, nk_f16_t const *b, 
 /** @copydoc nk_angular_f64 */
 NK_PUBLIC void nk_angular_f16_svehalf(nk_f16_t const *a, nk_f16_t const *b, nk_size_t n, nk_f32_t *result);
 #endif // NK_TARGET_SVEHALF
+
+#if NK_TARGET_SVE2
+/** @copydoc nk_angular_f64 */
+NK_PUBLIC void nk_angular_f16_sve2(nk_f16_t const *a, nk_f16_t const *b, nk_size_t n, nk_f32_t *result);
+#endif // NK_TARGET_SVE2
 
 #if NK_TARGET_SVEBFDOT
 /** @copydoc nk_euclidean_f64 */
@@ -897,10 +907,12 @@ NK_INTERNAL nk_dtype_t nk_angular_output_dtype(nk_dtype_t dtype) {
 #include "numkong/spatial/neon.h"
 #include "numkong/spatial/neonbfdot.h"
 #include "numkong/spatial/neonsdot.h"
+#include "numkong/spatial/neonfhm.h"
 #include "numkong/spatial/sve.h"
 #include "numkong/spatial/svehalf.h"
 #include "numkong/spatial/svebfdot.h"
 #include "numkong/spatial/svesdot.h"
+#include "numkong/spatial/sve2.h"
 #include "numkong/spatial/neonfp8.h"
 #include "numkong/spatial/haswell.h"
 #include "numkong/spatial/skylake.h"
@@ -1111,8 +1123,12 @@ NK_PUBLIC void nk_angular_f16(nk_f16_t const *a, nk_f16_t const *b, nk_size_t n,
     nk_angular_f16_rvvhalf(a, b, n, result);
 #elif NK_TARGET_RVV
     nk_angular_f16_rvv(a, b, n, result);
+#elif NK_TARGET_SVE2
+    nk_angular_f16_sve2(a, b, n, result);
 #elif NK_TARGET_SVEHALF
     nk_angular_f16_svehalf(a, b, n, result);
+#elif NK_TARGET_NEONFHM
+    nk_angular_f16_neonfhm(a, b, n, result);
 #elif NK_TARGET_NEON
     nk_angular_f16_neon(a, b, n, result);
 #elif NK_TARGET_DIAMOND
